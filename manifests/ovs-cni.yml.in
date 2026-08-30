@@ -39,7 +39,8 @@ spec:
           - >
             cp /ovs /host${CNI_MOUNT_PATH}/ovs &&
             cp /ovs-mirror-producer /host${CNI_MOUNT_PATH}/ovs-mirror-producer &&
-            cp /ovs-mirror-consumer /host${CNI_MOUNT_PATH}/ovs-mirror-consumer
+            cp /ovs-mirror-consumer /host${CNI_MOUNT_PATH}/ovs-mirror-consumer &&
+            cp /neutron-dhcp /host${CNI_MOUNT_PATH}/neutron-dhcp
         imagePullPolicy: ${OVS_CNI_PLUGIN_IMAGE_PULL_POLICY}
         securityContext:
           privileged: true

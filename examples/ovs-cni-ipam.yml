@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ovs-cni-ipam
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ovs-cni-ipam-role
+  namespace: kube-system
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "watch", "list", "update", "patch"]
+- apiGroups: ["openstack.humanz.moe"]
+  resources: ["neutronipaddresses","neutronconfigs"]
+  verbs: ["get", "watch", "list", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: ovs-cni-ipam
+  name: ovs-cni-ipam-rolebinding
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ovs-cni-ipam-role
+subjects:
+- kind: ServiceAccount
+  name: ovs-cni-ipam
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ovs-cni-ipam-RoleBinding
+  namespace: kube-system
+subjects:
+- kind: ServiceAccount
+  name: ovs-cni-ipam
+roleRef:
+  kind: ClusterRole
+  name: ovs-cni-ipam-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# This forces Kubernetes to generate a permanent token for the ServiceAccount
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ovs-cni-ipam-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: ovs-cni-ipam
+type: kubernetes.io/service-account-token
