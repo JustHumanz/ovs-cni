@@ -21,6 +21,7 @@
 package plugin
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -41,24 +42,20 @@ import (
 	"github.com/vishvananda/netlink"
 
 	"github.com/k8snetworkplumbingwg/ovs-cni/pkg/config"
+	k8sop "github.com/k8snetworkplumbingwg/ovs-cni/pkg/k8s-op"
+	neutrondhcp "github.com/k8snetworkplumbingwg/ovs-cni/pkg/neutron-dhcp"
 	"github.com/k8snetworkplumbingwg/ovs-cni/pkg/ovsdb"
 	"github.com/k8snetworkplumbingwg/ovs-cni/pkg/sriov"
 	"github.com/k8snetworkplumbingwg/ovs-cni/pkg/types"
 	"github.com/k8snetworkplumbingwg/ovs-cni/pkg/utils"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 const (
 	portTypeAccess = "access"
 	portTypeTrunk  = "trunk"
 )
-
-// EnvArgs args containing common, desired mac and ovs port name
-type EnvArgs struct {
-	cnitypes.CommonArgs
-	MAC         cnitypes.UnmarshallableString `json:"mac,omitempty"`
-	OvnPort     cnitypes.UnmarshallableString `json:"ovnPort,omitempty"`
-	K8S_POD_UID cnitypes.UnmarshallableString
-}
 
 func init() {
 	// this ensures that main runs only on main thread (thread group leader).
@@ -72,9 +69,9 @@ func logCall(command string, args *skel.CmdArgs) {
 		command, args.ContainerID, args.Netns, args.IfName, string(args.StdinData[:]))
 }
 
-func getEnvArgs(envArgsString string) (*EnvArgs, error) {
+func getEnvArgs(envArgsString string) (*types.EnvArgs, error) {
 	if envArgsString != "" {
-		e := EnvArgs{}
+		e := types.EnvArgs{}
 		err := cnitypes.LoadArgs(envArgsString, &e)
 		if err != nil {
 			return nil, err
@@ -263,6 +260,11 @@ func CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
+	netconf, err := config.LoadConf(args.StdinData)
+	if err != nil {
+		return err
+	}
+
 	var mac string
 	var ovnPort string
 	var contPodUid string
@@ -270,11 +272,69 @@ func CmdAdd(args *skel.CmdArgs) error {
 		mac = string(envArgs.MAC)
 		ovnPort = string(envArgs.OvnPort)
 		contPodUid = string(envArgs.K8S_POD_UID)
+		netconf.IPAM.PodName = string(envArgs.K8S_POD_NAME)
+		netconf.IPAM.PodNamespace = string(envArgs.K8S_POD_NAMESPACE)
+		netconf.IPAM.PodUID = string(envArgs.K8S_POD_UID)
 	}
 
-	netconf, err := config.LoadConf(args.StdinData)
-	if err != nil {
-		return err
+	// Set the pods Mac address and neutron portID from neutronipaddresses if they are not set in the config file
+	if netconf.IPAM.Type == neutrondhcp.PluginName {
+		k8sClient, err := k8sop.Initk8sClient(netconf)
+		if err != nil {
+			return fmt.Errorf("failed to initialize k8s client: %v", err)
+		}
+
+		listOptions := metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("state=unbound,network=%s", netconf.IPAM.NeutronUUID),
+		}
+
+		ipList, err := k8sClient.Resource(neutrondhcp.NeutronIpAddrGvr).Namespace(netconf.IPAM.PodNamespace).List(context.TODO(), listOptions)
+		if err != nil {
+			return fmt.Errorf("failed to list NeutronIPAddresses: %v", err)
+		}
+
+		if len(ipList.Items) == 0 {
+			return fmt.Errorf("no available IP addresses for Neutron UUID %s", netconf.IPAM.NeutronUUID)
+		}
+
+		item := ipList.Items[0]
+		itemName := item.GetName()
+
+		found := false
+		mac, found, err = unstructured.NestedString(item.Object, "spec", "macAddress")
+		if err != nil {
+			return fmt.Errorf("Error unstructured resources: %v", err)
+		}
+
+		if !found {
+			return fmt.Errorf("neutron address:%s macAddress not found", itemName)
+		}
+
+		ovnPort, found, err = unstructured.NestedString(item.Object, "spec", "portID")
+		if err != nil {
+			return fmt.Errorf("Error unstructured resources: %v", err)
+		}
+
+		if !found {
+			return fmt.Errorf("neutron address:%s portID not found", itemName)
+		}
+
+		if mac == "" || ovnPort == "" {
+			return fmt.Errorf("failed to find bound NeutronIPAddress for Pod UID %s in namespace %s", netconf.IPAM.PodUID, netconf.IPAM.PodNamespace)
+		}
+
+		// Update the IP address state to "resv-<PodUID>" after it is assigned to the container
+		err = unstructured.SetNestedField(item.Object, fmt.Sprintf("resv-%s", netconf.IPAM.PodUID), "metadata", "labels", "state")
+		if err != nil {
+			return fmt.Errorf("Error update unstructured label: %v", err)
+		}
+
+		_, err = k8sClient.Resource(neutrondhcp.NeutronIpAddrGvr).
+			Namespace(netconf.IPAM.PodNamespace).
+			Update(context.Background(), &item, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("Error update resources label: %v", err)
+		}
 	}
 
 	var vlanTagNum uint = 0

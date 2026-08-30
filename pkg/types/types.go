@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 
 	"github.com/containernetworking/cni/pkg/types"
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
 )
 
@@ -31,17 +32,18 @@ type NetConfs interface {
 // NetConf extends types.NetConf for ovs-cni
 type NetConf struct {
 	types.NetConf
-	BrName                 string   `json:"bridge,omitempty"`
-	VlanTag                *uint    `json:"vlan"`
-	MTU                    int      `json:"mtu"`
-	Trunk                  []*Trunk `json:"trunk,omitempty"`
-	DeviceID               string   `json:"deviceID"`       // PCI address of a VF in valid sysfs format
-	OfportRequest          uint     `json:"ofport_request"` // OpenFlow port number in range 1 to 65,279
-	InterfaceType          string   `json:"interface_type"` // The type of interface on ovs.
-	ConfigurationPath      string   `json:"configuration_path"`
-	SocketFile             string   `json:"socket_file"`
-	LinkStateCheckRetries  int      `json:"link_state_check_retries"`
-	LinkStateCheckInterval int      `json:"link_state_check_interval"`
+	BrName                 string      `json:"bridge,omitempty"`
+	VlanTag                *uint       `json:"vlan"`
+	MTU                    int         `json:"mtu"`
+	Trunk                  []*Trunk    `json:"trunk,omitempty"`
+	DeviceID               string      `json:"deviceID"`       // PCI address of a VF in valid sysfs format
+	OfportRequest          uint        `json:"ofport_request"` // OpenFlow port number in range 1 to 65,279
+	InterfaceType          string      `json:"interface_type"` // The type of interface on ovs.
+	ConfigurationPath      string      `json:"configuration_path"`
+	SocketFile             string      `json:"socket_file"`
+	LinkStateCheckRetries  int         `json:"link_state_check_retries"`
+	LinkStateCheckInterval int         `json:"link_state_check_interval"`
+	IPAM                   *IPAMConfig `json:"ipam"`
 }
 
 // netConfAlias is used to avoid infinite recursion when marshaling NetConf.
@@ -116,4 +118,29 @@ type CachedNetConf struct {
 // because prevResult wasn't available in cmdDel on those versions.
 type CachedPrevResultNetConf struct {
 	PrevResult *current.Result
+}
+
+// IPAMConfig contains IPAM configuration for Neutron DHCP plugin
+type IPAMConfig struct {
+	Name          string
+	Type          string            `json:"type"`
+	NeutronConfig string            `json:"neutron_config,omitempty"`
+	UseGateway    bool              `json:"gateway,omitempty"`
+	Routes        []*cnitypes.Route `json:"routes"`
+	KubeConfig    string            `json:"kubeconfig"`
+	NeutronUUID   string
+	PodName       string
+	PodNamespace  string
+	PodUID        string
+}
+
+// IPAMEnvArgs are the environment vars we expect
+type EnvArgs struct {
+	cnitypes.CommonArgs
+	MAC                        cnitypes.UnmarshallableString `json:"mac,omitempty"`
+	OvnPort                    cnitypes.UnmarshallableString `json:"ovnPort,omitempty"`
+	K8S_POD_UID                cnitypes.UnmarshallableString `json:"k8sPodUid,omitempty"`
+	K8S_POD_NAME               cnitypes.UnmarshallableString
+	K8S_POD_NAMESPACE          cnitypes.UnmarshallableString
+	K8S_POD_INFRA_CONTAINER_ID cnitypes.UnmarshallableString
 }

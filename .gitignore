@@ -21,3 +21,6 @@ cluster/multus-daemonset.yml
 
 # makefile GOPATH
 .gopath/
+
+# Vendor
+/vendor/
